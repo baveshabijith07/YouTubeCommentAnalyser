@@ -1,12 +1,13 @@
 import streamlit as st
 import re
 import requests
-from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 import matplotlib.pyplot as plt
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from collections import Counter
+import numpy as np
 
 # YouTube API configuration
 api_service_name = "youtube"
@@ -15,9 +16,12 @@ DEVELOPER_KEY = "AIzaSyDSDgzQb-FZdaAwnJhUIMSwIpdufvXtJuc"  # Replace with your A
 
 youtube = build(api_service_name, api_version, developerKey=DEVELOPER_KEY)
 
-# Load the tokenizer and DistilBERT model
-tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
-model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=3)
+# Load the tokenizer and RoBERTa model for sentiment analysis
+tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-sentiment")
+model = AutoModelForSequenceClassification.from_pretrained("cardiffnlp/twitter-roberta-base-sentiment")
+
+# Sentiment labels for the model
+LABELS = ["NEGATIVE", "NEUTRAL", "POSITIVE"]
 
 # Function to extract the video ID from a YouTube link
 def extract_video_id(url):
@@ -69,27 +73,14 @@ def fetch_comments(video_id):
         st.error(f"An HTTP error occurred: {e}")
         return []
 
-# Function to perform sentiment analysis with 3 categories: Positive, Negative, and Neutral
+# Function for sentiment analysis using batch processing
 def perform_sentiment_analysis(comments):
-    sentiments = []
-    for comment in comments:
-        # Tokenize and encode the comment with truncation for efficiency
-        inputs = tokenizer(comment, return_tensors="pt", truncation=True, padding=True, max_length=256)
-        
-        # Get predictions from the model
-        with torch.no_grad():
-            outputs = model(**inputs)
-        
-        # Classify sentiment based on model's output
-        sentiment_score = torch.argmax(outputs.logits, dim=1).item()
-        if sentiment_score == 0:
-            sentiment = 'NEGATIVE'
-        elif sentiment_score == 1:
-            sentiment = 'NEUTRAL'
-        else:
-            sentiment = 'POSITIVE'
-        sentiments.append(sentiment)
-    
+    inputs = tokenizer(comments, return_tensors="pt", truncation=True, padding=True, max_length=256)
+    with torch.no_grad():
+        outputs = model(**inputs)
+        scores = outputs.logits.numpy()
+    sentiment_indices = np.argmax(scores, axis=1)
+    sentiments = [LABELS[idx] for idx in sentiment_indices]
     return sentiments
 
 # Function to plot bar chart for sentiment distribution
@@ -171,9 +162,8 @@ if st.button("Analyze"):
                 for comment in negative_comments[:5]:  # Show top 5 negative comments
                     st.write(f"- {comment}")
 
-                # Common topic-related comments (display first few from each sentiment)
-                st.write(f"### What People Think About the Topic: {video_title}")
-                st.write("These comments reflect common thoughts about the video topic:")
+                # Common topic-related comments
+                st.write(f"### Common Thoughts on the Topic: {video_title}")
                 for comment in comments_data[:5]:  # Display top 5 comments
                     st.write(f"- {comment}")
             else:
